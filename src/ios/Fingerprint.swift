@@ -32,7 +32,7 @@ enum PluginError:Int {
         let params = command.argument(at: 0) as? [AnyHashable: Any] ?? [:]
         let allowBackup = params["allowBackup"] as? Bool ?? false
         let policy:LAPolicy = allowBackup ? .deviceOwnerAuthentication : .deviceOwnerAuthenticationWithBiometrics;
-        var pluginResult = CDVPluginResult(status: CDVCommandStatus_ERROR, messageAs: "Not available");
+        var pluginResult = CDVPluginResult(status: CDVCommandStatus.error, messageAs: "Not available");
         let available = authenticationContext.canEvaluatePolicy(policy, error: &error);
 
         var results: [String : Any]
@@ -52,12 +52,13 @@ enum PluginError:Int {
                     biometryType = "finger";
                 case .faceID:
                     biometryType = "face"
-                @unknown default:
-                    errorResponse["message"] = "Unkown biometry type"
+                default:
+                    // Other biometry types (including Optic ID) use the generic result.
+                    biometryType = "biometric"
                 }
             }
 
-            pluginResult = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: biometryType);
+            pluginResult = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: biometryType);
         }else{
             var code: Int;
             switch(error!._code) {
@@ -73,7 +74,7 @@ enum PluginError:Int {
                     break;
             }
             results = ["code": code, "message": error!.localizedDescription];
-            pluginResult = CDVPluginResult(status: CDVCommandStatus_ERROR, messageAs: results);
+            pluginResult = CDVPluginResult(status: CDVCommandStatus.error, messageAs: results);
         }
 
         commandDelegate.send(pluginResult, callbackId:command.callbackId);
@@ -84,7 +85,7 @@ enum PluginError:Int {
         let errorResponse: [AnyHashable: Any] = [
             "message": "Something went wrong"
         ];
-        var pluginResult = CDVPluginResult(status: CDVCommandStatus_ERROR, messageAs: errorResponse);
+        var pluginResult = CDVPluginResult(status: CDVCommandStatus.error, messageAs: errorResponse);
         var reason = "Authentication";
         var policy:LAPolicy = .deviceOwnerAuthentication;
         let data  = command.arguments[0] as? [String: Any];
@@ -112,7 +113,7 @@ enum PluginError:Int {
             localizedReason: reason,
             reply: { [unowned self] (success, error) -> Void in
                 if( success ) {
-                    pluginResult = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: "Success");
+                    pluginResult = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: "Success");
                 }else {
                     if (error != nil) {
 
@@ -131,7 +132,7 @@ enum PluginError:Int {
                            errorResult = ["code": e.code, "message": error!.localizedDescription];
                         }
 
-                        pluginResult = CDVPluginResult(status: CDVCommandStatus_ERROR, messageAs: errorResult);
+                        pluginResult = CDVPluginResult(status: CDVCommandStatus.error, messageAs: errorResult);
                     }
                 }
                 self.commandDelegate.send(pluginResult, callbackId:command.callbackId);
@@ -147,10 +148,10 @@ enum PluginError:Int {
             try? secret.delete()
             let invalidateOnEnrollment = (data?.object(forKey: "invalidateOnEnrollment") as? Bool) ?? false
             try secret.save(secretStr, invalidateOnEnrollment: invalidateOnEnrollment)
-            pluginResult = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: "Success");
+            pluginResult = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: "Success");
         } catch {
             let errorResult = ["code": PluginError.BIOMETRIC_UNKNOWN_ERROR.rawValue, "message": error.localizedDescription] as [String : Any];
-            pluginResult = CDVPluginResult(status: CDVCommandStatus_ERROR, messageAs: errorResult);
+            pluginResult = CDVPluginResult(status: CDVCommandStatus.error, messageAs: errorResult);
         }
         self.commandDelegate.send(pluginResult, callbackId:command.callbackId)
         return
@@ -166,7 +167,7 @@ enum PluginError:Int {
         var pluginResult: CDVPluginResult
         do {
             let result = try Secret().load(prompt)
-            pluginResult = CDVPluginResult(status: CDVCommandStatus_OK, messageAs: result);
+            pluginResult = CDVPluginResult(status: CDVCommandStatus.ok, messageAs: result);
         } catch {
             var code = PluginError.BIOMETRIC_UNKNOWN_ERROR.rawValue
             var message = error.localizedDescription
@@ -175,7 +176,7 @@ enum PluginError:Int {
                 message = err.localizedDescription
             }
             let errorResult = ["code": code, "message": message] as [String : Any]
-            pluginResult = CDVPluginResult(status: CDVCommandStatus_ERROR, messageAs: errorResult);
+            pluginResult = CDVPluginResult(status: CDVCommandStatus.error, messageAs: errorResult);
         }
         self.commandDelegate.send(pluginResult, callbackId:command.callbackId)
     }
@@ -282,12 +283,14 @@ class Secret {
     }
 
     func load(_ prompt: String) throws -> String {
+        let context = LAContext()
+        context.localizedReason = prompt
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrAccount as String: Secret.keyName,
                                     kSecMatchLimit as String: kSecMatchLimitOne,
-                                    kSecReturnData as String : kCFBooleanTrue,
+                                    kSecReturnData as String: true,
                                     kSecAttrAccessControl as String: getBioSecAccessControl(invalidateOnEnrollment: true),
-                                    kSecUseOperationPrompt as String: prompt]
+                                    kSecUseAuthenticationContext as String: context]
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
